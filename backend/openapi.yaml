@@ -1,0 +1,197 @@
+openapi: 3.1.0
+info:
+  title: Client Config Service
+  version: 1.0.0
+  description: |
+    The SDK fetches client configuration once on app launch from this service and
+    caches the response for the session. This document defines what the response
+    looks like, what each field means, and what defaults the SDK falls back to
+    when a field is missing.
+
+    If the API response disagrees with this document, **this document is
+    authoritative**.
+
+    ### Refresh policy
+
+    The SDK fetches config once at launch and caches the response in memory for
+    the rest of the session. To pick up a new config, the user must fully
+    restart the app (not just background and foreground it).
+
+    ### Failure mode
+
+    If the config endpoint is unreachable, returns a non-2xx status, or returns
+    invalid JSON:
+
+    - The SDK logs a warning to its on-device log.
+    - The SDK uses the defaults documented in each field below.
+    - Critically, the default for `platform` is `"android"`, meaning a failed
+      config fetch on an iOS app instance will cause events to be attributed to
+      Android until the next restart.
+
+    ### Undocumented fields
+
+    Any field that appears in the response but is not listed in this
+    specification is **not part of the public contract**. The SDK does not
+    read it. You may ignore such fields during investigation, or note
+    their presence, but they are out of scope unless you can demonstrate
+    a downstream impact.
+
+servers:
+  - url: http://localhost:8083
+    description: From the host machine
+  - url: http://10.0.2.2:8083
+    description: From the Android emulator (host loopback address)
+
+paths:
+  /config:
+    get:
+      summary: Fetch client config for an app instance
+      description: |
+        Called by the SDK exactly once, at app launch. The response is cached
+        for the rest of the session. There is no mid-session refresh.
+      operationId: getConfig
+      parameters:
+        - in: query
+          name: platform
+          required: true
+          schema:
+            $ref: '#/components/schemas/Platform'
+          description: The platform of the requesting app instance.
+        - in: query
+          name: app_id
+          required: true
+          schema:
+            type: string
+          description: Opaque identifier for the app instance.
+          example: test-app
+      responses:
+        '200':
+          description: Config served successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientConfig'
+              examples:
+                ios:
+                  summary: Expected response for an iOS request
+                  value:
+                    platform: ios
+                    ui_layout:
+                      toasts:
+                        session_ended: "Session Ended: {n} clicks"
+                    sample_rate: 1.0
+                    enabled_event_types: [view, click]
+                    retry_policy:
+                      max_retries: 3
+                      backoff_ms: 500
+        '400':
+          description: Invalid or missing `platform` query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Route not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+components:
+  schemas:
+    Platform:
+      type: string
+      enum: [android, ios]
+      description: Platform identifier. Only `android` and `ios` are supported.
+
+    Toasts:
+      type: object
+      required: [session_ended]
+      description: |
+        Strings shown in the toast that appears when the user dismisses an ad
+        overlay. Templates may contain placeholders the SDK interpolates at
+        render time.
+      properties:
+        session_ended:
+          type: string
+          description: |
+            Template shown when an ad session ends (overlay dismissed via X).
+            Must contain the placeholder `{n}`, which the SDK replaces with the
+            number of clicks the user made during the session. Conventionally
+            `"Session Ended: {n} clicks"`.
+
+    UiLayout:
+      type: object
+      required: [toasts]
+      description: |
+        UI configuration applied to the test app. The home screen renders a
+        single "View ad" button that opens a full-screen overlay; the overlay
+        renders the ad and an X to dismiss. These controls are internal SDK
+        behaviour and are **not** driven by this config.
+      properties:
+        toasts:
+          $ref: '#/components/schemas/Toasts'
+
+    RetryPolicy:
+      type: object
+      properties:
+        max_retries:
+          type: integer
+          minimum: 0
+          default: 3
+          description: Maximum number of times the SDK retries a failed event send.
+        backoff_ms:
+          type: integer
+          minimum: 0
+          default: 500
+          description: |
+            Initial backoff between retries, in milliseconds. Doubles on each
+            subsequent attempt.
+
+    ClientConfig:
+      type: object
+      required: [platform, ui_layout]
+      properties:
+        platform:
+          allOf:
+            - $ref: '#/components/schemas/Platform'
+          description: |
+            **MUST equal the `platform` query parameter from the request.** The
+            SDK uses this value to tag every outgoing event. A mismatch causes
+            events to be mis-attributed in the backend.
+
+            If this field is missing from the response, the SDK falls back to
+            the hardcoded default `"android"`.
+        ui_layout:
+          $ref: '#/components/schemas/UiLayout'
+        sample_rate:
+          type: number
+          minimum: 0.0
+          maximum: 1.0
+          default: 1.0
+          description: |
+            Fraction of events the SDK sends. `1.0` means every event is sent.
+            Values outside the range are clamped by the SDK and a warning is
+            logged.
+        enabled_event_types:
+          type: array
+          items:
+            type: string
+            enum: [view, click]
+          default: [view, click]
+          description: |
+            Event types the SDK is permitted to send. Events of other types
+            are dropped client-side. Must be a subset of `[view, click]`;
+            other values are ignored.
+        retry_policy:
+          $ref: '#/components/schemas/RetryPolicy'
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Machine-readable error code.
+      examples:
+        - error: invalid_platform
+        - error: not_found

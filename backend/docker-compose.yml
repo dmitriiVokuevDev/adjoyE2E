@@ -1,0 +1,97 @@
+# Backend stack: redis, writer (gRPC :8081), reader (gRPC :8082),
+# config (REST :8083), swagger-ui (:8084). All three Go services
+# are shipped as prebuilt image tarballs under ./images/. Load them
+# once, then bring the stack up.
+
+services:
+  redis:
+    image: redis:6.2.14
+    container_name: senior-qa-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  writer:
+    image: senior-qa-task/writer
+    platform: linux/amd64
+    container_name: senior-qa-writer
+    command:
+      - "--port=8081"
+      - "--redis-host=redis"
+      - "--redis-port=6379"
+      - "--log=/app/logs/writer.log"
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/logs/writer.log"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  reader:
+    image: senior-qa-task/reader
+    platform: linux/amd64
+    container_name: senior-qa-reader
+    command:
+      - "--port=8082"
+      - "--redis-host=redis"
+      - "--redis-port=6379"
+      - "--log=/app/logs/reader.log"
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      writer:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/logs/reader.log"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  config:
+    image: senior-qa-task/config
+    platform: linux/amd64
+    container_name: senior-qa-config
+    command:
+      - "--port=8083"
+      - "--log=/app/logs/config.log"
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8083/healthz | grep -q '\"ok\"' || exit 1"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  swagger-ui:
+    image: swaggerapi/swagger-ui:v5.17.14
+    container_name: senior-qa-swagger
+    environment:
+      SWAGGER_JSON: /spec/openapi.yaml
+      BASE_URL: /
+      DOC_EXPANSION: list
+    ports:
+      - "8084:8080"
+    volumes:
+      - ./openapi.yaml:/spec/openapi.yaml:ro
+    depends_on:
+      config:
+        condition: service_started
+    restart: unless-stopped

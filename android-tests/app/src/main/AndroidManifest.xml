@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- The harness itself is an empty app; it never shows UI. All work is done
+         from the androidTest APK, which drives the real QA app over UiAutomator
+         and reads the backend writer.log through the host log-agent. -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- The log-agent is reached over cleartext HTTP at 10.0.2.2 (host loopback). -->
+    <application android:usesCleartextTraffic="true" />
+
+</manifest>

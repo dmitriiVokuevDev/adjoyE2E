@@ -1,0 +1,35 @@
+syntax = "proto2";
+
+package writer;
+
+option go_package = "adjoe.io/qa-task/proto/writer;writer";
+
+// ViewRequest represents a single ad view event captured by the SDK.
+// Each ad session begins with one View RPC; subsequent Click RPCs in the
+// same session share the same id.
+message ViewRequest {
+  required string platform = 1; // "android" or "ios"
+
+  optional string ad = 2;       // identifier of the ad shown to the user
+
+  required string id = 3;       // session identifier; links view to subsequent clicks
+}
+
+// ClickRequest represents a single ad click within an open session. A view
+// must already exist with the same id before a click is accepted.
+message ClickRequest {
+  required string platform = 1;
+
+  required string ad = 2;
+
+  optional string id = 3;       // must match the id of an existing view for the ad
+}
+
+message Response {
+  optional string message = 1;
+}
+
+service WriterService {
+  rpc View(ViewRequest) returns (Response) {};
+  rpc Click(ClickRequest) returns (Response) {};
+}

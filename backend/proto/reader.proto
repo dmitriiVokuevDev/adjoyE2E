@@ -1,0 +1,29 @@
+syntax = "proto2";
+
+package reader;
+
+option go_package = "adjoe.io/qa-task/proto/reader;reader";
+
+// Request asks the reader for a ratio for one ad on one platform.
+// `type` is either "vtc" (view-to-click) or "vti" (view-to-installation).
+message Request {
+  required string type = 1;
+
+  required string platform = 2;
+
+  required string ad = 3;
+}
+
+// Response carries the computed ratio. When no views exist for the
+// requested (platform, ad), the value is zero rather than undefined.
+message Response {
+  required double value = 1;
+
+  required string platform = 2;
+
+  required string ad = 3;
+}
+
+service ReaderService {
+  rpc Read(Request) returns (Response) {};
+}
