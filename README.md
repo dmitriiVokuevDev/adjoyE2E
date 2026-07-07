@@ -1,134 +1,83 @@
-# Senior QA Engineer, Test Task
+# Adjoe — Senior QA Test Task
 
-This task asks you to test an ad-tracking system end-to-end. You'll run a small Android test app that drives the SDK, a backend that tracks events, and a config service that the SDK consults on launch. Your job is to test the system, find bugs, and report them clearly.
+End-to-end testing of an ad-tracking system (Android SDK app + writer / reader / config backend).
+Found **5 bugs** (2 Critical), verified spec-compliant behaviours, and built a **two-tier
+automation suite** (28 automated checks).
 
-## Description
+> The original task brief is preserved in **[TASK.md](TASK.md)**.
+> The full submission index is in **[deliverables/README.md](deliverables/README.md)**.
 
-Our company is building a product that tracks the performance of ads running on mobile devices. We have an Android SDK that communicates with the backend via gRPC. The backend tracks three types of metrics:
+## ⚠️ Not included in this repo
 
-- **views**, a view event happens every time a user watches an ad on their device. An ad can have at most one view per session.
-- **clicks**, a click event happens every time a user clicks on an ad they are watching. An ad can have multiple clicks per session.
-- **installations**, an installation event happens when a user installs the advertised app. The SDK does not send these; the backend receives them from a third party. (Simulated automatically in this task.)
+The company's **compiled assets are intentionally excluded** (their IP; also keeps the repo
+lean) — they are not committed, only `.gitignore`d:
 
-The metrics are counted per ad per platform (the same ad can run on `android` and `ios`, with different metrics for each). Every event (view and click) has an `id` shared across all events in the same ad session: one view and any number of clicks all share an `id`. Views are stored in a sliding window of size 10 per ad/platform, once 10 views exist, the oldest is evicted by the next.
+- `backend/images/*.tar` — the prebuilt **writer / reader / config Docker images**
+- `android/app-release.apk` — the **QA test app**
 
-The backend also exposes a service for retrieving current statistics: either the view-to-click ratio (`vtc`) or the view-to-installation ratio (`vti`) for a given ad on a platform.
+Both ship with the original task package. To run everything locally, drop them back into
+`backend/images/` and `android/` respectively.
 
-In addition to the gRPC services, an HTTP **config service** serves the client configuration that the SDK fetches on app launch. The SDK uses this config for platform attribution and UI text. The contract for this service is published as an OpenAPI specification you can browse in your local Swagger UI.
+## Approach
 
-If the ratios you observe in the reader don't match what you'd expect from the events you sent, that's a useful starting point. Investigate.
+The task suggested mostly **manual** checking of the Android app; I took it as a chance to build
+**proper end-to-end automation** instead. Honest caveat: this is a working proof of the approach —
+a production-grade version would need considerably more setup.
 
-## How the test app works
+An ad SDK has two sides that matter: the ad must **display correctly**, and the events it fires
+must be **recorded correctly** (the events are what the business runs on). The automation is split
+to match:
 
-The test app has a single home screen with a **View ad** button and a status panel. Tapping View ad sends a view event and opens a full-screen ad overlay. Inside the overlay:
+- **Display / UI → Kaspresso** (UiAutomator), driving the real APK.
+- **Event verification → an Appium-like agent** that gives the on-device tests access to the logs
+  the backend writes, so each UI action is checked against what was actually recorded.
 
-- Tapping the ad itself sends a click event tied to the same session.
-- Tapping the **X** in the corner closes the overlay and returns you to the home screen. A brief toast confirms what just happened.
+The core **vtc / vti** ratios can't be isolated from the UI (the ad id is pinned to `ad-001`), so
+those are covered by **Playwright** tests against the backend.
 
-Every fresh tap of View ad starts a new session, new id, new view, new overlay, so you can run multiple full flows per app launch.
+## Deliverables
 
-Further details:
+| File | What |
+|---|---|
+| [`deliverables/00-test-report.md`](deliverables/00-test-report.md) | Test report — approach, strategy & risks, coverage, investigation notes |
+| [`deliverables/01-bug-reports.md`](deliverables/01-bug-reports.md) | Prioritised bug list + full repro + open questions |
+| [`deliverables/02-bug-ticket-phantom-click.md`](deliverables/02-bug-ticket-phantom-click.md) | Detailed ticket for the top bug (BUG-1) |
+| [`deliverables/03-ai-usage-disclosure.md`](deliverables/03-ai-usage-disclosure.md) | AI usage disclosure |
 
-- Ads are identified by a unique string ad-ID.
-- Platform identifiers are `android` and `ios`.
-- The test app pins the platform per device, emulators identify as `android` by default.
+## Findings
 
-## Methodology
-
-This is a manual testing task. Drive the Android app on the emulator, observe what happens, cross-reference against the backend logs and the config response, and decide what's worth reporting. The backend services and the config endpoint can be exercised directly with `grpcurl`, `curl`, Postman, or whatever you reach for, useful for isolating signals you saw through the UI.
-
-Automated tests are a **bonus**, not the main path. The Android UI itself cannot be driven from the Playwright starter, Playwright runs a backend-only TypeScript client (gRPC for the writer/reader, `fetch` for the config service) and is useful only for codifying a backend-level regression check. If you reach for it, one or two thoughtful tests against the backend are worth more than a broad suite. Skipping automation entirely is fine and is not penalised, a senior QA decides what to invest in, and that decision is part of what we're evaluating.
-
-## Your tasks
-
-### Test the system
-Verify that the system meets the requirements described above and describe the bugs you find. If you're unsure whether something is a bug, write it down too.
-
-### Write a test report
-A short report detailing what you tested and how, so a developer, lead, or other QA can understand which scenarios you covered and the outcome of each. Quality of thinking matters more than length.
-
-### Write a bug ticket
-For one bug you found, write a ticket with enough detail that a developer or lead could prioritise it and start a fix without follow-up questions.
-
-### Prioritise the bugs
-Give every bug you found a priority and a brief justification.
-
-## What's in this folder
-
-- `backend/` — docker-compose stack (Redis + writer + reader + config + Swagger UI), prebuilt service images, proto files, log directory
-- `android/` — signed APK for the test app, plus emulator setup notes
-- `e2e/` — TypeScript starter for optional automation
-- `templates/` — one template for the AI usage disclosure. Other deliverables are your call on format.
-
-## Running
-
-### 1. Backend
-
-The writer, reader, and config services ship as prebuilt Docker images. Load them once, then bring the stack up:
-
-```sh
-cd backend
-./images/load.sh
-docker compose up -d
-```
-
-This starts five services:
-
-| Service | Port | Purpose |
+| # | Sev | Bug |
 |---|---|---|
-| `redis` | (internal) | Backing store for writer/reader |
-| `writer` | 8081 (gRPC) | Receives view and click events |
-| `reader` | 8082 (gRPC) | Returns vtc / vti ratios |
-| `config` | 8083 (REST) | Serves client config on app launch |
-| `swagger-ui` | 8084 (HTTP) | Renders the config service's OpenAPI spec |
+| BUG-1 | P0 | Closing the ad via the **X** records a phantom Click (inflates `vtc`) |
+| BUG-2 | P0 | Config returns misspelled `platfrom` → iOS events attributed to Android |
+| BUG-3 | P1 | `View` returns UNAVAILABLE on first attempts (breaks the provided example test) |
+| BUG-4 | P2 | `session_ended` template `"…{n clicks"` — broken `{n}` placeholder |
+| BUG-5 | P2 | `clicks_total` log field is windowed but named like a lifetime total |
 
-Logs stream to `backend/logs/{writer,reader,config}.log` (bind-mounted from the containers).
+## Automation
 
-### 2. Android emulator
+- **`e2e/`** — Playwright + TypeScript backend suite (17 checks). See [`e2e/README.md`](e2e/README.md).
+- **`android-tests/`** — Kaspresso + UiAutomator UI suite (11 checks). See [`android-tests/README.md`](android-tests/README.md).
 
-See `android/AVD-RECOMMENDED.md`. Short version:
+## How to run
 
-1. Android Studio → Device Manager → create AVD with Pixel 6, API 33, x86_64.
-2. Start the emulator.
-3. `adb install android/app-release.apk`
-4. Launch the test app. It's pre-configured to reach the local backend at `10.0.2.2:{8081,8082,8083}`.
-
-### 3. Smoke check
-
+**Backend** (required — needs the excluded `*.tar` images restored):
 ```sh
-# writer (gRPC)
-grpcurl -plaintext \
-  -import-path backend/proto -proto writer.proto \
-  -d '{"platform":"android","ad":"ad-test","id":"view-1"}' \
-  localhost:8081 writer.WriterService/View
-
-# config (REST)
-curl -s 'http://localhost:8083/config?platform=ios&app_id=test-app' | jq .
+cd backend && ./images/load.sh && docker compose up -d      # ./reset.sh to wipe state
 ```
 
-Open the app on the emulator, tap **View ad**, then tap the ad in the overlay, then X out — check `backend/logs/writer.log` for the corresponding view and click events.
+**Backend tests** (Playwright — no emulator needed):
+```sh
+cd e2e && npm install && npx playwright test
+```
 
-## Time
+**Android tests** (needs a running emulator — Pixel 6 / API 33 recommended — and JDK 17; needs the
+excluded APK restored):
+```sh
+cd android-tests
+echo "sdk.dir=$HOME/Library/Android/sdk" > local.properties   # or export ANDROID_HOME=<sdk path>
+./run-e2e.sh                                                   # full cycle: docker→install→test→Allure
+```
 
-We expect this to take around **4 hours of focused work**. You have a **3-day submission window** to fit setup, investigation, and write-up around your schedule. Don't try to do everything. A senior QA decides what to skip, and that decision is part of what we're looking at.
-
-## What to send back
-
-A single zip containing the four deliverables below. Format is your call — Markdown, PDF, a ticket export, or plaintext are all fine. We're evaluating structure and content, not adherence to any template.
-
-1. **A test report** — what you tested, your overall strategy, risk-ranked modules, findings summary, investigation notes. Quality of thinking over exhaustive coverage.
-2. **A bug ticket** — one detailed ticket for the bug you consider most important, in whatever format a developer or lead would need to prioritise and fix without follow-up questions.
-3. **A prioritised list** — every issue you found, with a priority and a brief justification per item.
-4. **An AI usage disclosure** — see `templates/ai-disclosure.md` for the questions we want answered. This is the one deliverable with a specific structure, because we compare disclosures across candidates.
-
-Optionally, include a `tests/` folder inside `e2e/` with one or two automated checks against the backend. This is a bonus, not a requirement — we'd rather see no automation than padding. If you do include automation, point us at it in your test report and explain what regression you're guarding against.
-
-## A note on AI tools
-
-We expect most candidates will use AI tools. That's fine. Tell us where you used them and what they helped with. Specific, honest disclosure is graded positively. Vague disclosure is graded negatively.
-
-## Questions
-
-If something is unclear or genuinely blocking you, reach out to your recruiter. Some ambiguity is intentional, part of the task is deciding what to do under uncertainty.
-
-Good luck.
+A few tests are intentional **red guards** for confirmed bugs (via `test.fail()` / a real exit
+code) — they pass once the bug is fixed. See the deliverables for detail.
